@@ -5,6 +5,7 @@ import sys
 import datetime
 from datetime import datetime as innerdatetime
 from dotenv import load_dotenv
+from db import create_stock_sentinel_databse, create_transactors_collection
 
 load_dotenv()
 
@@ -17,18 +18,12 @@ client = pymongo.MongoClient(CONN_STRING)
 db = client[DB]
 
 if DB not in client.list_database_names():
-    db.command({"customAction": "CreateDatabase", "offerThroughput": 400})
-
-senators = db[COLLECTION]
+    create_stock_sentinel_databse(client)
 
 if COLLECTION not in db.list_collection_names():
-    indexes = [
-        {"key": {"_id": 1}, "name": "_id_1"},
-        {"key": {"bio_id", 1}, "name": "_bio_id"},
-        {'key': {'first_name': 1}, 'name': '_first_name'},
-        {'key': {'last_name': 1}, 'name': '_last_name'}
-    ]
-    db.command({"customAction": "CreateCollection", "collection": COLLECTION, 'indexes': indexes})
+    create_transactors_collection(db)
+
+senators = db[COLLECTION]
 
 current = requests.get('https://theunitedstates.io/congress-legislators/legislators-current.json').json()
 previous = requests.get('https://theunitedstates.io/congress-legislators/legislators-historical.json').json()
