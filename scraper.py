@@ -37,14 +37,17 @@ TRANSACTIONS = "transactions"
 TRANSACTORS = "transactors"
 DB = "stocksentinel"
 
+# Connects to the database (CosmosDB, MongoDB API)
 client = pymongo.MongoClient(CONN_STRING)
 
+# Uses a function from another file to create DB
 if DB not in client.list_database_names():
     LOGGER.info('Creating Database')
     create_stock_sentinel_databse(client)
 
 db = client[DB]
 
+# Uses a function from another file to create Collection
 if TRANSACTIONS not in db.list_collection_names():
     LOGGER.info('Creating Transactions Collection')
     create_transactions_collection(db)
@@ -52,6 +55,7 @@ if TRANSACTIONS not in db.list_collection_names():
 transactions = db[TRANSACTIONS]
 senators = list(db[TRANSACTORS].find())
 
+# Decorator to add a rate limit to the requests
 def add_rate_limit(f):
     def with_rate_limit(*args, **kw):
         time.sleep(RATE_LIMIT_SECS)
@@ -63,6 +67,7 @@ s.get = add_rate_limit(s.get)
 s.post = add_rate_limit(s.post)
 s.headers.update({'User-Agent': 'Mozilla/5.0'})
 
+# Get the CSRF token from the search page after making initial agreement which will be used on subsequent requests
 def get_csrf()->str:
     LOGGER.info('Initiating Handshake')
     handshake = s.get(base_uri + home_uri)
@@ -84,6 +89,8 @@ def get_csrf()->str:
 
     return s.cookies['csrftoken']
 
+# Get the reports from the search page from a certain date
+#TODO: Add a date parameter to the function, taken from arguments provided to main
 def get_reports(token: str):
     start = 0
 
@@ -92,7 +99,7 @@ def get_reports(token: str):
         'length': str(BATCH_SIZE),
         'report_types': '[11]',
         'filer_types': '[]',
-        'submitted_start_date': '01/01/2020 00:00:00',
+        'submitted_start_date': '02/01/2024 00:00:00',
         'submitted_end_date': '',
         'candidate_state': '',
         'senator_state': '',
@@ -113,7 +120,9 @@ def get_reports(token: str):
         r = s.post(base_uri + report_uri, data=login_data, headers={'Referer': base_uri})
         r_json = r.json()['data']
 
-def handle_reports(reports: [str]):
+# Handle the reports from the search page
+#TODO: Handle paper reports with AI? experimental
+def handle_reports(reports: list[str]):
     for report in reports:
         if is_paper_report(report):
             continue
@@ -121,7 +130,9 @@ def handle_reports(reports: [str]):
         ptr_report = get_ptr_report(report)
         handle_ptr_report(ptr_report=ptr_report,report_meta=report)
 
-def handle_ptr_report(ptr_report: requests.Response, report_meta: [str]):
+# Handle the PTR report
+#TODO: Handle amendments
+def handle_ptr_report(ptr_report: requests.Response, report_meta: list[str]):
     soup = BeautifulSoup(ptr_report.content, "html.parser")
     h1 = soup.find('h1')
 
@@ -130,7 +141,8 @@ def handle_ptr_report(ptr_report: requests.Response, report_meta: [str]):
     else:
         handle_new_report(soup, report_meta)
 
-def handle_new_report(html: BeautifulSoup, report_meta: [str]):
+# Scrape html for transaction rows
+def handle_new_report(html: BeautifulSoup, report_meta: list[str]):
     table = html.find('tbody')
 
     if not table:
@@ -144,7 +156,8 @@ def handle_new_report(html: BeautifulSoup, report_meta: [str]):
     for row in rows:
         handle_transaction(row=row, ptr_id=ptr_id, transactor=transactor)
 
-def handle_transaction(row: BeautifulSoup, ptr_id: str, transactor: {}):
+# Handle individual transaction row, insert into db
+def handle_transaction(row: BeautifulSoup, ptr_id: str, transactor: dict):
 
     cells = row.find_all('td')
 
@@ -160,7 +173,7 @@ def handle_transaction(row: BeautifulSoup, ptr_id: str, transactor: {}):
     transaction = {
         "ptr_id": ptr_id,
         "ptr_row": ptr_row,
-        "transaction_date": cells[TRANSACTION_DATE_INDEX].get_text().strip(),
+        "transaction_date": datetime.datetime.strptime(cells[TRANSACTION_DATE_INDEX].get_text().strip(), '%m/%d/%Y'),
         "transactor": transactor,
         "ticker": cells[TICKER_INDEX].get_text().strip(),
         "asset_name": cells[ASSET_NAME_INDEX].get_text().strip(),
@@ -173,8 +186,10 @@ def handle_transaction(row: BeautifulSoup, ptr_id: str, transactor: {}):
     inserted = transactions.update_one({"ptr_id": ptr_id, "ptr_row": ptr_row}, {"$set": transaction}, upsert=True)
 
     LOGGER.info(f'Inserted: {inserted.modified_count}')
-    
-def get_transactor(report_meta: [str]) -> {}:
+
+# Crude way to get the transactor from the transactor db and match
+#TODO: Improve matching algorithm
+def get_transactor(report_meta: list[str]) -> dict:
     first_name = report_meta[0].split(' ')[0].strip().lower()
     last_name = report_meta[1].split(' ')[0].strip().lower()
 
@@ -190,20 +205,25 @@ def get_transactor(report_meta: [str]) -> {}:
     
     return matches[0]
 
-def handle_amendment(html: BeautifulSoup, report_meta: [str]):
+#TODO Handle amendments
+def handle_amendment(html: BeautifulSoup, report_meta: list[str]):
     pass
-    
+
+# Check if the transaction is a stock transaction via the type from html 
 def is_stock_transaction(type: str)->bool:
     return type.lower().find('stock') > -1
 
+# Check if the report is a paper report via prefix in the link
 def is_paper_report(item: str) -> bool:
     return item[3].find(PDF_PREFIX) > -1
 
-def get_ptr_report(item: [str]) -> requests.Response:
+# Get the PTR report from the link in the report
+def get_ptr_report(item: list[str]) -> requests.Response:
     link = get_link_of_ptr(item[3])
     return s.get(ptr_base_uri + link)
 
-def get_ptr_report_id(item: [str]) -> str:
+# Get the PTR ID from the link in the report, found my finding the 4th and 5th '/' in the link, crude but works
+def get_ptr_report_id(item: list[str]) -> str:
     link = item[3]
     start = find_nth(link, '/', 4) + 1
     end = find_nth(link, '/', 5)
@@ -212,20 +232,23 @@ def get_ptr_report_id(item: [str]) -> str:
     
     return link[start:end]
 
+# Get the link of the PTR report from the link in the report, it is the first quoted string in the link
 def get_link_of_ptr(item: str) -> str:
     start = item.find('"')
     end = item.find('"', start + 1)
 
     return item[start + 1:end]
 
-def get_links_from_report_response(r: requests.Response)->[str]:
+# Get the links from the report response
+def get_links_from_report_response(r: requests.Response)->list[str]:
     reports = r.json()['data']
 
     for report in reports:
-        print(report)
+        LOGGER.info(report)
 
     return reports
 
+# Find the nth occurence of a string in a string
 def find_nth(haystack: str, needle: str, n: int) -> int:
     start = haystack.find(needle)
     while start >= 0 and n > 1:
