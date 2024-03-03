@@ -1,6 +1,6 @@
 # Python Scraper for Stock Sentinel
 
-This scraper pulls senator stock transaction and transactor data, scraping it from official sources, and pushes it to an azure cosmos db instance. The stock data is incredibly opaque as given by the government, and this library attempts to fix that by putting the data in a digestable format. You can see more of this project on my (github profile)[https://github.com/hamannjames/pythonscraper].
+This scraper pulls senator stock transaction and transactor data, scraping it from official sources, and pushes it to an azure cosmos db instance. The stock data is incredibly opaque as given by the government, and this library attempts to fix that by putting the data in a digestable format. You can see more of this project on my [github profile](https://github.com/hamannjames/pythonscraper).
 
 ## Process
 
